@@ -2,7 +2,8 @@ import torch
 import pytest
 import torch.nn.functional as F
 
-from seqbench.transforms.generic.conv import TemporalConvolution
+from seqbench.transforms.base import TimeGrid
+from seqbench.transforms.generic.conv import TemporalFilter, TemporalUnfold
 from seqbench.transforms.generic.conv import make_temporal_kernel
 
 
@@ -54,7 +55,7 @@ class TestMakeTemporalKernel:
     def test_sin_kernel(self):
         """Test sinusoidal kernel generation."""
         kernel = make_temporal_kernel(
-            shape="sin", width=10.0, height=2.0, dt=0.1, frequency=1.0, phase_shift=0.0, mean_amplitude=1.0
+            shape="sin", width=10.0, height=2.0, out_dt=0.1, frequency=1.0, phase_shift=0.0, mean_amplitude=1.0
         )
         assert kernel.shape[0] == 101
         # Check that values oscillate around mean
@@ -79,46 +80,85 @@ class TestMakeTemporalKernel:
         assert kernel.dtype == dtype
 
     def test_missing_parameters(self):
-        """Test that missing required parameters raise assertions."""
-        with pytest.raises(AssertionError):
+        """Test that missing required parameters raise explicit errors."""
+        with pytest.raises(ValueError):
             make_temporal_kernel(shape="exp", width=5.0)
 
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
+            make_temporal_kernel(shape="double_exp", width=5.0, tau_1=1.0)
+
+        with pytest.raises(ValueError):
             make_temporal_kernel(shape="alpha", width=5.0)
 
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             make_temporal_kernel(shape="gauss", width=5.0, mu=0.0)
 
+        with pytest.raises(ValueError):
+            make_temporal_kernel(shape="sin", width=5.0, frequency=1.0, phase_shift=0.0)
 
-class TestTemporalConvolution:
-    """Tests for the TemporalConvolution class."""
+
+class TestTemporalUnfold:
+    """Tests for the TemporalUnfold class."""
 
     def test_initialization_basic(self):
         """Test basic initialization."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0)
-        assert tc.dt == 0.1
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0)
+        assert tc.out_dt == 0.1
         assert tc.duration == 1.0
         assert tc.time_axis.numel() == 10
+
+    def test_duration_must_align_with_out_dt(self):
+        """Test that duration must map to an integer number of output steps."""
+        kernel_spec = {"shape": "box", "params": {}}
+        with pytest.raises(ValueError, match="duration must align with out_dt"):
+            TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.05)
+
+    def test_kernel_spec_must_be_dict(self):
+        """Test that invalid kernel specs raise explicit type errors."""
+        with pytest.raises(TypeError, match="kernel_spec must be a dict"):
+            TemporalUnfold(kernel_spec="box", out_dt=0.1, duration=1.0)
+
+    def test_kernel_spec_requires_shape_and_params(self):
+        """Test that incomplete kernel specs raise explicit value errors."""
+        with pytest.raises(ValueError, match="missing required key"):
+            TemporalUnfold(kernel_spec={"shape": "box"}, out_dt=0.1, duration=1.0)
+
+    def test_kernel_spec_params_must_be_dict(self):
+        """Test that kernel params must be a dict."""
+        with pytest.raises(TypeError, match=r"params.*must be a dict"):
+            TemporalUnfold(kernel_spec={"shape": "box", "params": []}, out_dt=0.1, duration=1.0)
+
+    def test_list_amplitudes_are_rejected(self):
+        """Test that unsupported list amplitudes fail explicitly."""
+        kernel_spec = {"shape": "box", "params": {}}
+        with pytest.raises(ValueError, match="List amplitudes are not supported"):
+            TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0, amplitude=[1.0])
 
     def test_initialization_with_num_steps(self):
         """Test initialization with explicit num_steps."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, num_steps=20, duration=2.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, num_steps=20, duration=2.0)
+        assert tc.time_axis.numel() == 20
+
+    def test_initialization_with_num_steps_only(self):
+        """Test initialization when only explicit num_steps is provided."""
+        kernel_spec = {"shape": "box", "params": {}}
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, num_steps=20)
         assert tc.time_axis.numel() == 20
 
     def test_inconsistent_parameters(self):
         """Test that inconsistent parameters raise error."""
         kernel_spec = {"shape": "box", "params": {}}
         with pytest.raises(ValueError):
-            TemporalConvolution(
-                kernel_spec=kernel_spec, dt=0.1, num_steps=20, duration=1.0  # Inconsistent: should be 2.0
+            TemporalUnfold(
+                kernel_spec=kernel_spec, out_dt=0.1, num_steps=20, duration=1.0  # Inconsistent: should be 2.0
             )
 
     def test_amplitude_scaling(self):
         """Test amplitude scaling."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0, amplitude=2.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0, amplitude=2.0)
 
         x = torch.ones(5)
         result = tc(x)
@@ -130,7 +170,7 @@ class TestTemporalConvolution:
     def test_spike_position_center(self):
         """Test spike positioned at center."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0, spike_pos="center")
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0, impulse_pos="center")
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -143,7 +183,7 @@ class TestTemporalConvolution:
     def test_spike_position_start(self):
         """Test spike positioned at start."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0, spike_pos="start")
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0, impulse_pos="start")
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -154,7 +194,7 @@ class TestTemporalConvolution:
     def test_spike_position_end(self):
         """Test spike positioned at end."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0, spike_pos="end")
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0, impulse_pos="end")
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -165,7 +205,7 @@ class TestTemporalConvolution:
     def test_spike_position_integer(self):
         """Test spike positioned at specific index."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0, spike_pos=3)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0, impulse_pos=3)
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -177,7 +217,7 @@ class TestTemporalConvolution:
     def test_multidimensional_input(self):
         """Test with multi-dimensional input."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0)
 
         x = torch.ones(3, 4, 5)
         result = tc(x)
@@ -188,7 +228,7 @@ class TestTemporalConvolution:
     def test_exponential_kernel_convolution(self):
         """Test convolution with exponential kernel."""
         kernel_spec = {"shape": "exp", "params": {"tau": 0.2}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.05, duration=1.0, spike_pos="start")
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.05, duration=1.0, impulse_pos="start")
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -200,7 +240,7 @@ class TestTemporalConvolution:
     def test_gaussian_kernel_convolution(self):
         """Test convolution with Gaussian kernel."""
         kernel_spec = {"shape": "gauss", "params": {"mu": 0.0, "sigma": 0.1}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.05, duration=1.0, spike_pos="center")
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.05, duration=1.0, impulse_pos="center")
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -213,7 +253,7 @@ class TestTemporalConvolution:
     def test_multiple_inputs(self):
         """Test with multiple non-zero inputs."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0)
 
         x = torch.tensor([1.0, 0.0, 0.5, 0.0, 2.0])
         result = tc(x)
@@ -228,7 +268,7 @@ class TestTemporalConvolution:
     def test_3d_tensor_shape(self):
         """Test output shape for 3D tensor input."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0)
 
         # Test with shape (2, 3, 4) - batch, height, width
         x = torch.ones(2, 3, 4)
@@ -240,7 +280,7 @@ class TestTemporalConvolution:
     def test_zero_input(self):
         """Test with all-zero input."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0)
 
         x = torch.zeros(5)
         result = tc(x)
@@ -251,7 +291,7 @@ class TestTemporalConvolution:
     def test_device_consistency(self):
         """Test that output is on same device as input."""
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.1, duration=1.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.1, duration=1.0)
 
         if torch.cuda.is_available():
             x = torch.ones(5, device="cuda")
@@ -266,7 +306,7 @@ class TestTemporalConvolution:
         """Test that convolution properly centers the kernel at spike position."""
         # Use a simple box kernel for easy verification
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=1.0, duration=20.0, spike_pos=10)  # Spike at index 10
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=1.0, duration=20.0, impulse_pos=10)  # Spike at index 10
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -285,7 +325,7 @@ class TestTemporalConvolution:
     def test_exponential_decay_direction(self):
         """Test that exponential kernel decays in the correct direction (forward in time)."""
         kernel_spec = {"shape": "exp", "params": {"tau": 2.0}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=1.0, duration=20.0, spike_pos=5)  # Spike at index 5
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=1.0, duration=20.0, impulse_pos=5)  # Spike at index 5
 
         x = torch.tensor([1.0])
         result = tc(x)
@@ -308,7 +348,7 @@ class TestTemporalConvolution:
         kernel_spec = {"shape": "gauss", "params": {"mu": 0.0, "sigma": 1.0}}
 
         for spike_pos in [0, 5, 10]:
-            tc = TemporalConvolution(kernel_spec=kernel_spec, dt=0.5, duration=10.0, spike_pos=spike_pos)
+            tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=0.5, duration=10.0, impulse_pos=spike_pos)
 
             x = torch.tensor([1.0])
             result = tc(x)
@@ -323,7 +363,7 @@ class TestTemporalConvolution:
         """Manually verify convolution with a simple box kernel."""
         # Create a box kernel of width 4 (5 points: 0,1,2,3,4)
         kernel_spec = {"shape": "box", "params": {}}
-        tc = TemporalConvolution(kernel_spec=kernel_spec, dt=1.0, duration=10.0, spike_pos=5, amplitude=1.0)
+        tc = TemporalUnfold(kernel_spec=kernel_spec, out_dt=1.0, duration=10.0, impulse_pos=5, amplitude=1.0)
 
         # Override kernel with simple one for testing
         tc.kernel = torch.tensor([1.0, 1.0, 1.0])  # 3-point box
@@ -498,6 +538,37 @@ class TestTemporalConvolution:
         assert torch.argmax(result[0, 0]).item() == spike_pos, "Peak should be at spike position"
         assert abs(result[0, 0, spike_pos].item() - 1.0) < 0.01, "Peak value should be ~1.0"
         assert result[0, 0, spike_pos + 1].item() < result[0, 0, spike_pos].item(), "Should decay"
+
+
+class TestTemporalFilter:
+    def test_kernel_spec_must_be_dict(self):
+        with pytest.raises(TypeError, match="kernel_spec must be a dict"):
+            TemporalFilter(kernel_spec="box")
+
+    def test_kernel_spec_requires_shape_and_params(self):
+        with pytest.raises(ValueError, match="missing required key"):
+            TemporalFilter(kernel_spec={"shape": "box"})
+
+    def test_requires_resolved_time_grid_before_call(self):
+        filt = TemporalFilter(kernel_spec={"shape": "box", "params": {"width": 0.2}})
+        with pytest.raises(RuntimeError, match="resolve_time_grid"):
+            filt(torch.ones(10, 2))
+
+    def test_time_spec_requires_input_grid(self):
+        filt = TemporalFilter(kernel_spec={"shape": "box", "params": {"width": 0.2}})
+        assert filt.time_spec(None).kind == "require"
+
+    def test_preserves_time_grid_and_shape(self):
+        filt = TemporalFilter(kernel_spec={"shape": "box", "params": {"width": 0.2}})
+        spec = filt.time_spec(TimeGrid(0.1))
+        assert spec.kind == "preserve"
+        assert filt.kernel is None
+        filt.bind_time_grid(TimeGrid(0.1), TimeGrid(0.1))
+        x = torch.zeros(10, 2)
+        x[2, 0] = 1.0
+        out = filt(x)
+        assert out.shape == x.shape
+        assert out[2:, 0].sum() > 0
 
 
 if __name__ == "__main__":

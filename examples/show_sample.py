@@ -1,29 +1,16 @@
 import os
-import random
 import logging
 import argparse
 import collections
-
 import torch
 import numpy as np
-
-# seqbench
-from seqbench import SeqDataset
-from seqbench.transforms import compose_transforms_from_config
-from seqbench.utils.config import Config
-from seqbench.utils import prepare_config
-from seqbench.utils import get_config_hash
-from seqbench.seq_dataset import PadSequence
-from seqbench.dataset import create_base_dataset_from_config
-
-# symseq
-from symseq.seqwrapper import SeqWrapper
-
 from matplotlib import pyplot as plt
 
-plt.rcParams["image.interpolation"] = "none"
+# seqbench
+from seqbench import build_dataloader
 
-__script_name__ = os.path.basename(__file__)
+
+plt.rcParams["image.interpolation"] = "none"
 
 logger = logging.getLogger("show_sample")
 
@@ -78,7 +65,7 @@ def show_sample(
     fname=None,
     fname_ax=None,
     sample_number=1,
-    do_classify=True,
+    per_token_classify=True,
 ):
     """
     Shows the sample (both input and target sequences) using matplotlib.
@@ -98,7 +85,7 @@ def show_sample(
     plt.rcParams["savefig.dpi"] = 300
     plt.rcParams["text.usetex"] = False
 
-    if do_classify:
+    if per_token_classify:
         alphabet = target_prob_generator.get_unreduced_states_sorted()
     else:
         alphabet = target_prob_generator.get_reduced_states_sorted()
@@ -138,7 +125,7 @@ def show_sample(
     # show data.
     params = {"cmap": "Greys"}
 
-    if do_classify:
+    if per_token_classify:
         ax1.set_title(f"Inputs={[target_prob_generator.id_to_red_state(s) for s in sequence]}")
     else:
         Inputs_state = [target_prob_generator.id_to_unred_state(s) for s in sequence]
@@ -151,14 +138,13 @@ def show_sample(
 
     ax1.imshow(
         np.transpose(tensor, [1, 0]),
-        # aspect='auto', origin='lower', interpolation='none', **params)
-        aspect="equal",
+        aspect="auto",
         origin="lower",
         interpolation="none",
         **params,
     )
 
-    if do_classify:
+    if per_token_classify:
         classes = torch.nn.functional.one_hot(data_tuple.classes[sample_number, :sample_length], num_classes=vocab_size)
         classes = torch.swapaxes(classes, 0, 1)
         ax2.imshow(classes, aspect="auto", origin="lower", interpolation="none", **params)
@@ -206,7 +192,7 @@ def show_sample(
     sequence = aux_tuple.debug_class_seq[sample_number, :]
     sequence = sequence.cpu().detach().numpy()
 
-    if do_classify:
+    if per_token_classify:
         plt.title(f"Inputs={[target_prob_generator.id_to_red_state(s) for s in sequence]}")
     else:
         Inputs_state = [target_prob_generator.id_to_unred_state(s) for s in sequence]
@@ -229,50 +215,16 @@ if __name__ == "__main__":
     """Tests sequence generator - generates and displays a random sample"""
 
     args = parse_cli_arguments()
-    config = Config.parse_config_from_args(args)
-    config.print_config()
-
-    # seq_dataset = create_seq_dataset_from_config(config, 'train')
-
-    # symseq
-    # sw = SeqWrapper.from_config(os.path.join("examples", "configs", "example.toml"))
-    sw = SeqWrapper.from_dict(config)
-    generator = sw.generator
-
-    seqbench_config = prepare_config(config["seqbench"])
-    seed = seqbench_config["seed"]
-    seqbench_config["do_classify"] = True
-    seqbench_config["dataset_size"] = seqbench_config["data_generation"]["train_size"]
-    seqbench_config["config_file_path"] = args["config"]
-
-    # base dataset
-    kwargs = {"alphabet_size": config["symseq"]["generator"]["constraints"]["alphabet_size"]}
-    base_dataset = create_base_dataset_from_config(seqbench_config, "train", **kwargs)
-
-    config_hash = get_config_hash(config)
-
-    dataset_root = seqbench_config["data_generation"]["output_dir"]
-    dataset_root = f"{dataset_root}/{config_hash}"
-
-    transforms = compose_transforms_from_config(seqbench_config)
-
-    seq_dataset = SeqDataset(
-        config=seqbench_config,
-        generator=generator,
-        base_dataset=base_dataset,
-        is_train=True,
-        pad_index=-1,
-        dataset_root=dataset_root,
-        transform=transforms,
-    )
-
-    seq_loader = torch.utils.data.DataLoader(
-        seq_dataset,
+    seq_loader = build_dataloader(
+        args["config"],
+        split="train",
         batch_size=3,
         shuffle=True,
-        collate_fn=PadSequence(do_classify=seqbench_config["do_classify"], pad_index=-1),
         num_workers=0,
     )
+    seq_dataset = seq_loader.dataset
+    inp_map = seq_dataset.input_mapping
+    per_token_classify = seq_dataset.per_token_classify
 
     batch = next(iter(seq_loader))
 
@@ -281,7 +233,7 @@ if __name__ == "__main__":
     len_seqs = batch["lens"]
     debug_class_seq = batch["debug_class_seq"]
 
-    if not seqbench_config["do_classify"]:
+    if not per_token_classify:
         target_probs = batch["target_probs"]
     else:
         target_probs = None
@@ -289,8 +241,8 @@ if __name__ == "__main__":
     data_tuple = DataTuple(data, labels)
     aux_tuple = AlgSeqAuxTuple(len_seqs, target_probs, labels, debug_class_seq)
 
-    inp_enc = seqbench_config["input_mapping"]["base"]
-    if seqbench_config["do_classify"]:
+    inp_enc = inp_map.base
+    if per_token_classify:
         fname = f"show_sample_{inp_enc}_classify"
     else:
         fname = f"show_sample_{inp_enc}_prob"
@@ -302,5 +254,5 @@ if __name__ == "__main__":
         path="img",
         fname=fname,
         fname_ax=f"stimulus_{inp_enc}",
-        do_classify=seqbench_config["do_classify"],
+        per_token_classify=per_token_classify,
     )

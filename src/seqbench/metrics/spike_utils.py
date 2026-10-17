@@ -13,9 +13,14 @@ Utilities for processing and analyzing spike data, including PCA and visualizati
 # - Simple visualizations
 
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
+try:
+    from scipy.ndimage import gaussian_filter1d
+    from sklearn.decomposition import PCA
+except ImportError as exc:
+    raise ImportError(
+        "SeqBench spike metrics require scipy and scikit-learn. "
+        "Install SeqBench with the metrics extra: pip install 'seqbench[metrics]'."
+    ) from exc
 
 # ---------- Utilities ----------
 

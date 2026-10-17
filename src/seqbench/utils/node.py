@@ -6,9 +6,15 @@ Node visualization utilities for graph and network representations.
 """
 
 import numpy as np
-import matplotlib.patches as mpatches
-from matplotlib.collections import PatchCollection
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import PatchCollection
+except ImportError as exc:
+    raise ImportError(
+        "matplotlib is required for SeqBench node visualization. "
+        "Install SeqBench with the viz extra: pip install 'seqbench[viz]'."
+    ) from exc
 
 
 class Node:

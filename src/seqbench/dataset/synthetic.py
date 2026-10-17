@@ -20,20 +20,28 @@ class OneHot:
     
     Attributes:
         vocab_size: Number of unique tokens/classes in the vocabulary
+        n_steps: Number of timesteps each stimulus occupies on the time grid
         labels: Array of label indices (0 to vocab_size-1)
         stimulus: Dictionary mapping label indices to one-hot vectors
         class_dict: Dictionary mapping class indices to themselves
     """
 
-    def __init__(self, vocab_size):
+    def __init__(self, vocab_size, n_steps=1):
         """
         Initialize the one-hot dataset.
-        
+
         Args:
             vocab_size: Number of unique tokens/classes in the vocabulary
+            n_steps: Number of timesteps each stimulus occupies on the time
+                grid. The one-hot row is repeated ``n_steps`` times so the
+                caller can express a physical stimulus duration on the final
+                output grid. Defaults to 1 (a single timestep).
         """
 
+        if n_steps < 1:
+            raise ValueError(f"OneHot n_steps must be >= 1, got {n_steps}")
         self.vocab_size = vocab_size
+        self.n_steps = n_steps
         self.labels = np.arange(self.vocab_size)
         one_hot = np.eye(self.vocab_size, dtype=int)
         self.stimulus = {k: v for i, (k, v) in enumerate(zip(self.labels, one_hot))}
@@ -58,11 +66,11 @@ class OneHot:
         
         Returns:
             tuple: (x, y) where:
-                - x: One-hot encoded tensor of shape (1, vocab_size)
+                - x: One-hot encoded tensor of shape (n_steps, vocab_size)
                 - y: Label index (same as input index)
         """
 
         x = self.stimulus[index]
-        x = x[None, :]
+        x = np.tile(x[None, :], (self.n_steps, 1))
 
         return torch.from_numpy(x), index

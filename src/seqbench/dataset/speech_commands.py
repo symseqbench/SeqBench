@@ -15,11 +15,11 @@ from os.path import join
 from collections import defaultdict
 
 import torch
-import torchaudio
 try:
+    import torchaudio
     from torchaudio.transforms import MFCC
 except ImportError:
-    print("Warning: MFCC not loaded")
+    torchaudio = None
     MFCC = None
 
 from seqbench.dataset.base import BaseDataset
@@ -85,6 +85,11 @@ class SpeechCommands(BaseDataset):
         split,
         return_raw=False
     ):
+        if torchaudio is None:
+            raise ImportError(
+                "torchaudio is required for the SpeechCommands dataset. "
+                "Install SeqBench with the audio extra: pip install 'seqbench[audio]'."
+            )
         if split not in ["training", "validation", "testing"]:
             raise ValueError(f"Invalid split {split}")
 

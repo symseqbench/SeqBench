@@ -24,18 +24,57 @@ classifiers = [
 ]
 dependencies = [
     "numpy",
-    "more-itertools",
     "torch",
-    "pandas",
-    "torchaudio",
     "tqdm",
-    "matplotlib",
-    "wandb",
-    "h5py"
-    #"symseq", #TODO: add symseq back when it is ready
+    "PyYAML",
+    "typer",
 ]
 
+[project.scripts]
+seqbench = "seqbench.cli:main"
+
 [project.optional-dependencies]
+audio = [
+    "torchaudio",
+    "torchcodec",
+]
+hdf5 = [
+    "h5py",
+]
+metrics = [
+    "pandas",
+    "nltk",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+]
+symseq = [
+    "symseq>=0.1.0",
+]
+tonic = [
+    "tonic",
+]
+viz = [
+    "matplotlib",
+]
+wandb = [
+    "wandb",
+]
+all = [
+    "h5py",
+    "matplotlib",
+    "nltk",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "seaborn",
+    "symseq>=0.1.0",
+    "tonic",
+    "torchaudio",
+    "torchcodec",
+    "wandb",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",

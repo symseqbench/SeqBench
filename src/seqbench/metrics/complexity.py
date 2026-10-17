@@ -6,19 +6,28 @@ Complexity metrics for analyzing sequence data and model representations.
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, adjusted_rand_score, normalized_mutual_info_score
-from sklearn.linear_model import LogisticRegression
-from sklearn.cluster import KMeans
-from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import StandardScaler
-from scipy.spatial.distance import pdist, squareform
-from scipy.stats import pearsonr
 import warnings
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # needed for 3D projection
-from sklearn.decomposition import PCA
+try:
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  # needed for 3D projection
+    from scipy.spatial.distance import pdist, squareform
+    from scipy.stats import pearsonr
+    from sklearn.cluster import KMeans
+    from sklearn.decomposition import PCA
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import (
+        adjusted_rand_score,
+        calinski_harabasz_score,
+        normalized_mutual_info_score,
+        silhouette_score,
+    )
+    from sklearn.neighbors import NearestNeighbors
+    from sklearn.preprocessing import StandardScaler
+except ImportError as exc:
+    raise ImportError(
+        "SeqBench complexity metrics require matplotlib, scipy, and scikit-learn. "
+        "Install SeqBench with the metrics extra: pip install 'seqbench[metrics]'."
+    ) from exc
 
 warnings.filterwarnings("ignore")
 

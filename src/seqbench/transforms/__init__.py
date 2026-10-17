@@ -15,6 +15,7 @@ from pathlib import Path
 
 from seqbench.transforms.compose import Compose
 from seqbench.transforms.functional import FunctionalTransform
+from seqbench.transforms.base import DeclaredTimeBehavior, TransformTimeSpec
 
 try:
     import torch
@@ -75,40 +76,71 @@ def _normalize_params(params):
     return normalized
 
 
-def compose_transforms_from_config(config):
-    """
-    Create a Compose object from the transforms defined in the config.
-    Supports dotted paths (e.g., "tonic.transforms.ToFrame") and functions (wrapped in FunctionalTransform).
-    """
-    if "transforms" not in config["input_mapping"]:
+def _parse_time_behavior(raw):
+    if raw is None:
         return None
-    
-    transforms_dict = config["input_mapping"]["transforms"]
-    transforms = []
+    if isinstance(raw, str):
+        raw = {"kind": raw}
+    if not isinstance(raw, dict):
+        raise ValueError("time_behavior must be a string or dict")
 
-    for name, params in transforms_dict.items():
-        params = _normalize_params(params)
-        
+    kind = raw.get("kind")
+    if kind not in {"preserve", "create", "resample", "require", "unknown"}:
+        raise ValueError(
+            "time_behavior.kind must be one of "
+            "'preserve', 'create', 'resample', 'require', or 'unknown'"
+        )
+    return TransformTimeSpec(
+        kind,
+        out_dt=raw.get("out_dt"),
+        expected_in_dt=raw.get("expected_in_dt"),
+    )
+
+
+def compose_transforms_from_config(input_mapping):
+    """
+    Create a Compose object from the transforms defined in an
+    :class:`~seqbench.config.InputMappingCfg`.
+
+    Supports dotted paths (e.g., "tonic.transforms.ToFrame") and plain
+    callables (wrapped in :class:`FunctionalTransform`).
+
+    Returns ``None`` if no transforms are configured.
+    """
+    transforms_spec = input_mapping.transforms
+    if not transforms_spec:
+        return None
+
+    transforms = []
+    for spec in transforms_spec:
+        transform_type = spec["type"]
+        params = _normalize_params(dict(spec.get("params") or {}))
+        time_spec = _parse_time_behavior(spec.get("time_behavior"))
+
         try:
             # Handle dotted paths (e.g., "tonic.transforms.ToFrame")
-            if "." in name:
-                parts = name.split(".")
+            if "." in transform_type:
+                parts = transform_type.split(".")
                 module = importlib.import_module(".".join(parts[:-1]))
                 obj = getattr(module, parts[-1])
             else:
-                obj = globals()[name]
-            
+                obj = globals()[transform_type]
+
             # Wrap functions, instantiate classes
             if inspect.isclass(obj):
                 t = obj(**params)
             elif callable(obj):
                 t = FunctionalTransform(obj, **params)
             else:
-                raise ValueError(f"{name} is not callable")
-                
+                raise ValueError(f"{transform_type} is not callable")
+
         except Exception as e:
-            raise RuntimeError(f"Could not create transform {name} with params {params}") from e
-        
+            raise RuntimeError(
+                f"Could not create transform {transform_type} with params {params}"
+            ) from e
+
+        if time_spec is not None:
+            t = DeclaredTimeBehavior(t, time_spec)
         transforms.append(t)
 
     return Compose(transforms)

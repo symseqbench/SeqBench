@@ -13,4 +13,4 @@ config=$root"/examples/configs/onehot_raw.yaml"
 
 export PYTHONPATH=$root/src:$PYTHONPATH
 
-python3 -B $root/src/seqbench/create_dataset.py --config $config
+python3 -B -m seqbench.cli create $config

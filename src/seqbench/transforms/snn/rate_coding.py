@@ -7,22 +7,25 @@ Rate coding transform for converting continuous values to spike rates.
 
 import torch
 
+from seqbench.transforms.base import TransformTimeSpec
+
 
 class RateCoding:
     """
-    Convert continuous-valued data into firing rate (Hz or arbitrary units).
+    Convert continuous-valued intensities into firing rates.
 
-    This transform maps arbitrary numeric input (audio features, pixels,
-    embeddings...) into non-negative firing rates suitable for neuromorphic
-    encoding. Typically used before PoissonEncoder or other spike encoders.
+    With ``normalize=False`` (the default), input is interpreted as normalized
+    intensity and multiplied by ``max_rate``. With ``normalize=True``, input is
+    min-max normalized to ``[0, 1]`` before that scaling. Typically used before
+    ``PoissonEncoding`` or other spike encoders.
 
     Parameters
     ----------
     max_rate : float
         Upper bound for the output rate (e.g., 100–500 Hz typical).
     normalize : bool
-        If True, input is normalized to [0, 1] per-sample before scaling.
-        This is useful when inputs have variable range.
+        If True, input is min-max normalized to [0, 1] before scaling.
+        If False, input is treated as already normalized intensity.
     clamp : bool
         If True, negative values are clamped to 0 after scaling.
     eps : float
@@ -51,6 +54,9 @@ class RateCoding:
         self.clamp = clamp
         self.eps = eps
 
+    def time_spec(self, input_grid):
+        return TransformTimeSpec("preserve")
+
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """
         Convert arbitrary input tensor into non-negative rate values.
@@ -71,11 +77,13 @@ class RateCoding:
 
         #     # Scale to [0,1]
         #     x = (x - x_min) / (x_max - x_min + self.eps)
+        # Optionally normalize to [0, 1] before scaling so the output spans
+        # [0, max_rate] regardless of the input's range.
         if self.normalize:
             x_min, x_max = x.min(), x.max()
             if x_max <= x_min:
                 return torch.zeros_like(x)
-            rates = (x - x_min) / (x_max - x_min)
+            x = (x - x_min) / (x_max - x_min)
 
         # Scale to rate
         rates = x * self.max_rate

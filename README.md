@@ -66,8 +66,9 @@ Please refer to the specific dataset documentation for requirements.
 Create a sequence dataset from a configuration file:
 
 ```bash
-cd examples
-bash bash/create_dataset.bash
+seqbench validate SeqBench/examples/configs/onehot_raw.yaml
+seqbench create SeqBench/examples/configs/onehot_raw.yaml
+seqbench inspect-batch SeqBench/examples/configs/onehot_raw.yaml
 ```
 
 ### Visualizing a sample
@@ -75,63 +76,27 @@ bash bash/create_dataset.bash
 View a sample from your dataset:
 
 ```bash
-cd examples
-python show_sample.py --config configs/onehot_raw.yaml
+seqbench show-sample SeqBench/examples/configs/onehot_raw.yaml
 ```
 
 Or for other datasets:
 
 ```bash
-python show_sample.py --config configs/shd_easy.yaml
+seqbench show-sample SeqBench/examples/configs/shd_pre.yaml
 ```
 make sure to download the dataset to directory specified in the config file,
-i.e., seqbench.input_mapping.base_dataset_path
+i.e., `seqbench.input_mapping.base_params.base_dataset_path`.
 
 ### Example Usage with PyTorch
 
 ```python
-import torch
-from torch.utils.data import DataLoader
+from seqbench import build_dataloader
 
-from symseq.seqwrapper import SeqWrapper
-
-from seqbench.seq_dataset import SeqDataset, PadSequence
-from seqbench.utils.config import Config
-from seqbench.dataset import create_base_dataset_from_config
-from seqbench.transforms import compose_transforms_from_config
-
-# Load configuration
-args = {"config": "examples/configs/shd_easy.yaml"}
-seqbench_config = Config.parse_config_from_args(args)
-
-# Create sequence generator using symseq
-sw = SeqWrapper.from_dict(seqbench_config)
-generator = sw.generator
-
-# Create base dataset
-base_dataset = create_base_dataset_from_config(seqbench_config, "train")
-
-# Compose transforms
-transforms = compose_transforms_from_config(seqbench_config)
-
-# Create SeqDataset
-dataset = SeqDataset(
-    config=seqbench_config,
-    generator=generator,
-    base_dataset=base_dataset,
-    is_train=True,
-    pad_index=-1,
-    dataset_root=dataset_root,
-    transform=transforms,
-)
-
-# Use with DataLoader (PadSequence handles variable-length sequences)
-dataloader = DataLoader(
-    dataset,
+dataloader = build_dataloader(
+    "SeqBench/examples/configs/onehot_raw.yaml",
+    split="train",
     batch_size=32,
     shuffle=True,
-    collate_fn=PadSequence(do_classify=seqbench_config["do_classify"],
-                           pad_index=-1),
     num_workers=0,
 )
 
@@ -140,6 +105,8 @@ for batch in dataloader:
     inputs = batch["data"]      # Input sequences
     targets = batch["labels"]   # Target labels
     lengths = batch["lens"]     # Sequence lengths
+    # Other keys depend on the task mode and may include:
+    # "target_probs", "gap_mask", and "debug_class_seq".
     # Train your model...
 ```
 

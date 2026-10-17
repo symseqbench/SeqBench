@@ -2,17 +2,18 @@
 # Copyright (c) 2025-present, SeqBench Contributors
 
 """
-Dimension expansion transform for adding dimensions to tensors.
+Axis resizing transform for expanding existing tensor dimensions.
 """
 
 import torch
 
+from seqbench.transforms.base import TransformTimeSpec
+
 
 class ExpandDim:
     """
-    Expand an arbitrary dimension `axis` of a tensor from N_in to N_out by:
-      1. Repeating the slice along that dim floor(N_out / N_in) times
-      2. Padding with the first slices along that dim if needed
+    Resize an existing dimension `axis` of a tensor from N_in to N_out by
+    repeated index selection. This transform does not insert a new axis.
 
     Works for any tensor shape. This is useful for expanding the number of
     input neurons in a spiking model, for example.
@@ -22,6 +23,11 @@ class ExpandDim:
         """"""
         self.axis = axis
         self.target_size = target_size
+
+    def time_spec(self, input_grid):
+        if input_grid is not None and self.axis == 0:
+            raise ValueError("ExpandDim(axis=0) cannot preserve an existing time grid")
+        return TransformTimeSpec("preserve")
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """

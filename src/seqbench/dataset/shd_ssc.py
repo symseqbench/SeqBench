@@ -10,13 +10,17 @@ Dataset loader for SHD (Spiking Heidelberg Digits) and SSC (Spiking Speech Comma
 
 import logging
 
-import h5py
 import torch
 import numpy as np
 
 from seqbench.dataset.base import BaseDataset
 
 logger = logging.getLogger(__name__)
+
+try:
+    import h5py
+except ImportError:
+    h5py = None
 
 
 class SpikingDataset(BaseDataset):
@@ -48,6 +52,11 @@ class SpikingDataset(BaseDataset):
             max_time: Maximum time in seconds (default: 1.4)
             num_bins: Number of bins for spatial binning (default: 1)
         """
+        if h5py is None:
+            raise ImportError(
+                "h5py is required for SHD/SSC datasets. "
+                "Install SeqBench with the hdf5 extra: pip install 'seqbench[hdf5]'."
+            )
         self.nb_steps = nb_steps
         self.num_bins = num_bins
         self.nb_units = 700

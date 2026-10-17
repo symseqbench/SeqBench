@@ -10,6 +10,8 @@ import numpy as np
 import torch
 import logging
 
+from seqbench.transforms.base import TransformTimeSpec
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,8 +19,14 @@ class PoissonEncoding:
     """
     Generate a Poisson-distributed spike train from continuous input.
 
-    Temporal input: first dimension = time (T, ...), if explicitly specified.
-    Static input: any shape, last dimension treated as "units".
+    Temporal input uses the current pipeline ``TimeGrid`` as the input frame
+    duration and emits spikes on ``spike_dt`` seconds per row. Static input has
+    no input grid; ``duration`` gives the physical spike-train duration in
+    seconds.
+
+    By default, input values are interpreted directly as firing rates in Hz.
+    Set ``normalize=True`` only when the input should be min-max normalized to
+    ``[0, max_rate]`` before sampling.
 
     Spike probability is computed correctly via:
         p = 1 - exp(-rate * dt)
@@ -28,10 +36,10 @@ class PoissonEncoding:
     def __init__(
         self,
         temporal: bool = False,
-        frame_dt: float = None,
+        duration: float = None,
         spike_dt: float = 0.001,
         max_rate: float = 100.0,
-        normalize: bool = True,
+        normalize: bool = False,
         frozen_noise: bool = False,
         seed: int = None,
     ):
@@ -40,14 +48,17 @@ class PoissonEncoding:
         ----------
         temporal : bool
             Whether input has a temporal dimension (time-varying).
-        frame_dt : float
-            Duration of each input frame (seconds). Required for temporal input.
+        duration : float
+            Static-mode spike-train duration in seconds. Required when
+            ``temporal`` is False and ignored when ``temporal`` is True.
         spike_dt : float
-            Resolution of spike grid (seconds). Default 1 ms = 0.001.
+            Output spike-grid resolution in seconds per row. Default
+            1 ms = 0.001.
         max_rate : float
-            Maximum firing rate in Hz.
+            Maximum firing rate in Hz when ``normalize=True``.
         normalize : bool
-            If True, normalize input to [0, max_rate].
+            If True, normalize input to [0, max_rate]. If False, input is
+            treated as rates in Hz.
         seed : int
             Random seed for reproducibility.
         frozen_noise : bool
@@ -55,12 +66,13 @@ class PoissonEncoding:
         """
 
         self.temporal = temporal
-        self.frame_dt = frame_dt
+        self.duration = duration
         self.spike_dt = spike_dt
         self.max_rate = max_rate
         self.normalize = normalize
         self.frozen_noise = frozen_noise
         self.trng = torch.Generator()
+        self.input_dt = None
 
         if seed is not None:
             self.seed = seed
@@ -68,11 +80,45 @@ class PoissonEncoding:
         else:
             self.seed = np.random.randint(0, 10000)
 
-        if temporal and frame_dt is None:
-            raise ValueError("frame_dt must be specified for temporal data")
+        if not temporal and duration is None:
+            raise ValueError("duration must be specified for static PoissonEncoding")
 
         if spike_dt <= 0:
             raise ValueError("spike_dt must be positive")
+
+    def time_spec(self, input_grid):
+        if self.temporal:
+            if input_grid is None:
+                return TransformTimeSpec("require")
+            return TransformTimeSpec(
+                "resample",
+                out_dt=self.spike_dt,
+                expected_in_dt=input_grid.dt,
+            )
+        return TransformTimeSpec("create", out_dt=self.spike_dt)
+
+    def bind_time_grid(self, input_grid, output_grid):
+        if not self.temporal:
+            return
+        if input_grid is None:
+            raise ValueError("Temporal PoissonEncoding requires an input time grid")
+        ratio = input_grid.dt / self.spike_dt
+        bins_per_frame = int(round(ratio))
+        if bins_per_frame <= 0:
+            raise ValueError(f"input dt ({input_grid.dt}) must be >= spike_dt ({self.spike_dt})")
+        if abs(ratio - bins_per_frame) > 1e-9:
+            raise ValueError(
+                "Temporal PoissonEncoding requires input_dt / spike_dt to be an "
+                f"integer ratio, got {input_grid.dt:g} / {self.spike_dt:g}"
+            )
+        self.input_dt = input_grid.dt
+
+    def expected_time_steps(self, input_steps, input_shape=None):
+        if self.temporal:
+            if self.input_dt is None:
+                return None
+            return input_steps * int(round(self.input_dt / self.spike_dt))
+        return int(round(self.duration / self.spike_dt))
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -97,9 +143,14 @@ class PoissonEncoding:
         rates = self._normalize(x) if self.normalize else x
 
         # Expand each frame in time
-        bins_per_frame = int(round(self.frame_dt / self.spike_dt))
+        if self.input_dt is None:
+            raise RuntimeError(
+                "Temporal PoissonEncoding requires Compose.resolve_time_grid() "
+                "before it can be called"
+            )
+        bins_per_frame = int(round(self.input_dt / self.spike_dt))
         if bins_per_frame <= 0:
-            raise ValueError(f"frame_dt ({self.frame_dt}) must be >= spike_dt ({self.spike_dt})")
+            raise ValueError(f"input dt ({self.input_dt}) must be >= spike_dt ({self.spike_dt})")
 
         # # Expand time dimension: [T_in, ...] -> [T_in * bins_per_frame, ...]
         rates_exp = rates.repeat_interleave(bins_per_frame, dim=0)
@@ -126,10 +177,9 @@ class PoissonEncoding:
             self.trng.manual_seed(self.seed)
 
         # Treat last dimension as units, expand over time according to max_rate & spike_dt
-        duration = self.frame_dt if self.frame_dt is not None else 1.0  # default 1s
-        n_bins = int(round(duration / self.spike_dt))
+        n_bins = int(round(self.duration / self.spike_dt))
         if n_bins <= 0:
-            raise ValueError(f"Duration {duration} must be >= spike_dt ({self.spike_dt})")
+            raise ValueError(f"Duration {self.duration} must be >= spike_dt ({self.spike_dt})")
 
         x_expanded = x.unsqueeze(0).repeat(n_bins, *([1] * (x.ndim)))  # [T_out, ...]
         rates_hz = self._normalize(x_expanded) if self.normalize else x_expanded
@@ -160,7 +210,7 @@ class PoissonEncoding:
 #         Number of independent Poisson processes (channels) per spike pattern.
 
 #     pattern_duration : float or list of float
-#         Duration (in ms) of each spike pattern. Can be a fixed scalar (applied to all tokens),
+#         Duration in seconds for each spike pattern. Can be a fixed scalar (applied to all tokens),
 #         or a list specifying different durations per token.
 
 #     rate : float or array-like of shape (n_tokens,)
@@ -168,13 +218,13 @@ class PoissonEncoding:
 #         or an array specifying one rate per token.
 
 #     resolution : float
-#         Temporal resolution (dt) in milliseconds for the generated spike patterns.
+#         Temporal resolution in seconds for the generated spike patterns.
 
 #     jitter : NOT YET IMPLEMENTED! None or tuple (float, bool), optional
 #         Temporal jitter to apply to the spike times. If provided, should be a tuple
 #         (jitter_value, compensate), where:
 #             - jitter_value : float
-#                 Maximum jitter (in ms) applied to spike times.
+#                 Maximum jitter in seconds applied to spike times.
 #             - compensate : bool
 #                 Whether to adjust the pattern duration to maintain mean firing rate after jitter.
 
@@ -206,12 +256,12 @@ class PoissonEncoding:
 #     n_processes : int
 #         Number of independent processes (neurons).
 #     duration : float | dict
-#         Duration of the spike train in milliseconds. Can be a scalar or a dictionary with keys
+#         Duration of the spike train in seconds. Can be a scalar or a dictionary with keys
 #         ['dist', 'params'] describing a sampler.
 #     rates : float or 1D torch.Tensor
 #         Firing rate(s) in Hz. Scalar (applied to all processes) or a tensor of shape [n_processes].
 #     dt : float, optional
-#         Time resolution in milliseconds. Defaults to 1.0 ms.
+#         Time resolution in seconds.
 #     rng : torch.Generator or None, optional
 #         Random number generator for reproducibility. If None, a new generator is created and
 #         seeded from torch.seed() (non-deterministic).

@@ -5,10 +5,16 @@
 Center crop transform for vision data processing.
 """
 
+from seqbench.transforms.base import TransformTimeSpec
+
+
 class CenterCrop:
     def __init__(self, sensor_size, output_size):
         self.sensor_size = sensor_size
         self.output_size = output_size
+
+    def time_spec(self, input_grid):
+        return TransformTimeSpec("preserve")
 
     def __call__(self, img):
         if isinstance(self.output_size, int):

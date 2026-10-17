@@ -6,8 +6,28 @@ Metrics utilities for sequence analysis including n-gram frequency calculations.
 """
 
 import numpy as np
-import pandas as pd
-import nltk
+
+
+def _require_pandas():
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError(
+            "pandas is required for SeqBench metrics display/DataFrame output. "
+            "Install SeqBench with the metrics extra: pip install 'seqbench[metrics]'."
+        ) from exc
+    return pd
+
+
+def _require_nltk():
+    try:
+        import nltk
+    except ImportError as exc:
+        raise ImportError(
+            "nltk is required for SeqBench edit-distance metrics. "
+            "Install SeqBench with the metrics extra: pip install 'seqbench[metrics]'."
+        ) from exc
+    return nltk
 
 
 def chunk(seq, n):
@@ -45,13 +65,17 @@ def chunk_transitions(seq, n, display=True, return_labels=False):
 	for ii, i in enumerate(un_ngrams):
 		for jj, j in enumerate(un_ngrams):
 			M[ii, jj] = float(any(nGrams[np.where(nGrams == i)[0][:-1] + 1] == j))
-	df = pd.DataFrame(M, columns=un_ngrams, index=un_ngrams)
-	if display:
-		print(df)
 	if return_labels:
+		pd = _require_pandas()
+		df = pd.DataFrame(M, columns=un_ngrams, index=un_ngrams)
+		if display:
+			print(df)
 		return df
-	else:
-		return M
+	if display:
+		pd = _require_pandas()
+		df = pd.DataFrame(M, columns=un_ngrams, index=un_ngrams)
+		print(df)
+	return M
 
 
 def hamming_distance(seq1, seq2):
@@ -69,4 +93,5 @@ def edit_distance(seq1, seq2):
 	:param seq1:
 	:param seq2:
 	"""
+	nltk = _require_nltk()
 	return nltk.edit_distance(seq1, seq2)

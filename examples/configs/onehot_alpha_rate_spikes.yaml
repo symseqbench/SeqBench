@@ -1,72 +1,72 @@
-################################################################################
-###                                 SymSeq                                   ###
-################################################################################
+run:
+  seed: 42
+
+symbol_space:
+  alphabet:
+    size: 10
+  eos: "#"
+
 symseq:
-  ################################################################################
-  # Generator
-  ################################################################################
   generator:
-    type: "ArtificialGrammar"
-    mode: "random"  # "preset" | "random" | "custom"
-    seed: 42
-    constraints:
-      label: "Constrained Random Grammar"
-      alphabet_size: 10
+    type: ArtificialGrammar
+    mode: random
+    params:
+      label: Constrained Random Grammar
       ambiguities: 0
       ambiguity_depth: 0
       n_start_states: 1
       transition_density: 0.25
       assume_equiprobable: true
-      min_string_length: 1
-      eos: "#"
+  trial_constraints:
+    length:
+      min: 1
+      max: 20
+  tasks:
+    - id: next_token
+      type: NStepPrediction
+      params:
+        n: 1
 
-
-
-################################################################################
-###                                 SeqBench                                 ###
-################################################################################
 seqbench:
-    
-    seed: 42
-    mode: "file"  # "offline", "online" or "file"
-
-    prob_generator_type: "restricted"
-
-    data_generation:
-        train_size: 100
-        test_size: 100
-        seq_len_min: 1
-        seq_len_max: 20
-        combine_sequences: True  # concatenate sequences
-        combined_seq_length: 20  # padding
-        regenerate: False
-        output_dir: 'data/SeqBench'
-
-    input_mapping:
-        base: "one_hot"  # 
-        
-        transforms:
-          ExpandDim:
-            axis: 1  # TODO how can the user keep track of this?
-            target_size: 700
-          # this yields a temporal dimension of nb_steps = duration/dt = 100
-          TemporalConvolution:
-            kernel_spec:
-              shape: "alpha"
-              params:
-                tau: 20.0
-                width: 100.
-            dt: 1.
-            duration: 100.0
-            amp: 10.0
-
-          RateCoding:
-            max_rate: 100.0
-            normalize: True
-
-          PoissonEncoding:
-            # TemporalConvolution from previous step adds a temporal dimension
-            temporal: True  
-            frame_dt: 0.001  # in seconds
-            spike_dt: 0.001  # in seconds
-
+  mode: file
+  prob_generator_type: restricted
+  splits:
+    train: 100
+    test: 100
+  time_grid:
+    dt: 0.001
+  storage:
+    path: data/SeqBench
+    force_rebuild: true
+  composition:
+    combine_sequences: true
+    sample_length: 20
+  input_mapping:
+    base: one_hot
+    base_params: {}
+    transforms:
+      - type: ExpandDim
+        params:
+          axis: 1
+          target_size: 700
+      - type: TemporalUnfold
+        params:
+          kernel_spec:
+            shape: alpha
+            params:
+              tau: 0.01
+              width: 0.1
+          out_dt: 0.001
+          duration: 0.1
+          amplitude: 100.0
+      - type: RateCoding
+        params:
+          max_rate: 200.0
+          normalize: true
+      - type: PoissonEncoding
+        params:
+          temporal: true
+          spike_dt: 0.001
+  task:
+    source: symseq
+    ref_id: next_token

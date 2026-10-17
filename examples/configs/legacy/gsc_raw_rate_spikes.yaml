@@ -1,0 +1,100 @@
+# Converts raw GSC audio data to Poisson spikes
+# TODO incomplete, raw datasets not yet available
+
+################################################################################
+###                                 SymSeq                                   ###
+################################################################################
+symseq:
+  ################################################################################
+  # Generator
+  ################################################################################
+  generator:
+    type: "ArtificialGrammar"
+    mode: "random"  # "preset" | "random" | "custom"
+    seed: 42
+    constraints:
+      label: "Constrained Random Grammar"
+      alphabet_size: 10
+      ambiguities: 0
+      ambiguity_depth: 0
+      n_start_states: 1
+      transition_density: 0.25
+      assume_equiprobable: true
+      min_string_length: 1
+      eos: "#"
+
+
+################################################################################
+###                                 SeqBench                                 ###
+################################################################################
+seqbench:
+    
+    seed: 42
+    mode: "file"  # "offline", "online" or "file"
+    prob_generator_type: "restricted"
+
+    data_generation:
+        train_size: 100
+        test_size: 100
+        seq_len_min: 1
+        seq_len_max: 20
+        combine_sequences: True  # concatenate sequences
+        combined_seq_length: 20  # padding
+        regenerate: False
+        output_dir: 'data/SeqBench'
+
+    # only for dynamic embedding
+    input_mapping:
+        base: "gsc"  # 
+        base_dataset_path: 'datasets/GSC'
+        bin_size: 10
+        split: 'training'
+        return_raw: True
+
+        transforms:
+            MFCC:
+                sample_rate: 16000
+                n_mfcc: 13
+                n_mels: 40
+                n_fft: 512
+                win_length: 400
+                hop_length: 160
+            AdaptivePercentileNorm:
+                floor_percentile: 10.0
+                ceil_percentile: 90.0
+            PowerLaw:
+                gamma: 5.0
+            ExpandDim:
+                axis: 1
+                target_size: 700
+            RateCoding:
+                max_rate: 100.0
+                normalize: True
+            PoissonEncoding:
+                temporal: True  
+                spike_dt: 0.001  # in seconds
+            BinAlongAxis:
+                bin_size: 5
+                bin_axis: -1
+                reduction: "binary"
+            
+        # ?!!! === e + e TODO this must be checked again after raw dataset is available
+        # base_params:  # passed on to the base dataset 
+        #     method: "log-mel"
+
+        # # params:
+        # duration: {dist: "uniform", params: {low: 5, high: 5}}  
+
+        # dynamic: {
+        #     type: "rate",  # or frozen_noise or poisson_spikes
+        #     params: {
+        #         # dims: 700,
+        #         kernel: {
+        #             shape: "box",
+        #             params: {},
+        #             # shape: "exp",
+        #             # params: {tau: 20.0}
+        #         },
+
+        #     }
+        # }

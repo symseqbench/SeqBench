@@ -13,99 +13,121 @@ from configuration files. Supported datasets include:
 - Tonic datasets (DVSGesture, NMNIST, etc.)
 """
 
-import os
-from seqbench.dataset.shd_ssc import SpikingDataset
-from seqbench.dataset.speech_commands import SpeechCommands
-from seqbench.dataset.synthetic import OneHot
-from seqbench.dataset.tonic_wrapper import TonicDatasetWrapper, TONIC_DATASET_REGISTRY
+from seqbench.transforms.base import TimeGrid
 
 
-def create_base_dataset_from_config(config, split, **kwargs):
+_TIME_CREATING_TRANSFORMS = {"TemporalUnfold", "MFCC", "LogMel"}
+
+
+def has_time_creating_transform(input_mapping):
+    """Return True when config transforms create a new leading time axis."""
+    for transform in input_mapping.transforms:
+        behavior = transform.get("time_behavior")
+        if isinstance(behavior, str):
+            if behavior == "create":
+                return True
+        elif isinstance(behavior, dict) and behavior.get("kind") == "create":
+            return True
+
+        transform_type = transform["type"].split(".")[-1]
+        params = transform.get("params") or {}
+        if transform_type in _TIME_CREATING_TRANSFORMS:
+            return True
+        if transform_type == "PoissonEncoding" and not params.get("temporal", False):
+            return True
+    return False
+
+
+def initial_time_grid_from_config(input_mapping, final_dt=None):
+    """Return the base dataset's native time grid, if it has one."""
+    bp = input_mapping.base_params
+    if input_mapping.base in {"shd", "ssc"}:
+        return TimeGrid(dt=bp["max_time"] / bp["nb_steps"])
+    if input_mapping.base == "gsc" and not bp.get("return_raw", False):
+        # SpeechCommands computes MFCCs internally with hop_length=160 and
+        # sample_rate=16000 when return_raw=False.
+        return TimeGrid(dt=160 / 16000)
+    if input_mapping.base == "one_hot" and final_dt is not None:
+        if not has_time_creating_transform(input_mapping):
+            return TimeGrid(dt=final_dt)
+    return None
+
+
+def create_base_dataset_from_config(input_mapping, split, final_dt=None, **kwargs):
     """
-    Factory function to create a base dataset from configuration.
-    
-    This function reads the input mapping configuration and instantiates the
-    appropriate dataset class based on the 'base' field in the config.
-    
+    Factory function to create a base dataset from an
+    :class:`~seqbench.config.InputMappingCfg`.
+
     Args:
-        config: Configuration object containing input_mapping settings
-        split: Dataset split ('train' or 'test')
-        **kwargs: Additional keyword arguments passed to dataset constructors
-            (e.g., 'alphabet_size' for one_hot datasets)
-    
-    Returns:
-        BaseDataset: An instance of the appropriate dataset class
-        
-    Raises:
-        ValueError: If the input encoding type is unknown or required parameters
-            are missing (e.g., alphabet_size for one_hot datasets)
-    
-    Supported base types:
-        - 'shd': Spiking Heidelberg Digits dataset
-        - 'ssc': Spiking Speech Commands dataset
-        - 'gsc': Google Speech Commands dataset
-        - 'one_hot': Synthetic one-hot encoded dataset
-        - Any key in TONIC_DATASET_REGISTRY: Tonic library datasets
+        input_mapping: :class:`~seqbench.config.InputMappingCfg` instance.
+        split: Dataset split ('train' or 'test').
+        final_dt: Final grid resolution in seconds. Used to convert
+            ``base_params.duration`` (seconds) into a stimulus step count for
+            one_hot.
+        **kwargs: Additional keyword arguments (e.g. ``alphabet_size`` for one_hot).
     """
-    inp_map_config = config["input_mapping"]
-    if inp_map_config["base"] == "shd":
+    bp = input_mapping.base_params  # plain dict of base-specific parameters
+
+    if input_mapping.base == "shd":
+        from seqbench.dataset.shd_ssc import SpikingDataset
+
         return SpikingDataset(
             "shd",
-            inp_map_config["base_dataset_path"],
+            bp["base_dataset_path"],
             split,
-            nb_steps=inp_map_config["nb_steps"],
-            max_time=inp_map_config["max_time"],
-            num_bins=inp_map_config["num_bins", 1],
+            nb_steps=bp["nb_steps"],
+            max_time=bp["max_time"],
+            num_bins=bp.get("num_bins", 1),
         )
-    if inp_map_config["base"] == "ssc":
+    if input_mapping.base == "ssc":
+        from seqbench.dataset.shd_ssc import SpikingDataset
+
         return SpikingDataset(
             "ssc",
-            inp_map_config["base_dataset_path"],
+            bp["base_dataset_path"],
             split,
-            nb_steps=inp_map_config["nb_steps"],
-            max_time=inp_map_config["max_time"],
-            num_bins=inp_map_config["num_bins", 1],
+            nb_steps=bp["nb_steps"],
+            max_time=bp["max_time"],
+            num_bins=bp.get("num_bins", 1),
         )
-    elif inp_map_config["base"] == "gsc":
-        if split == "train":
-            split = "training"
-        else:
-            split = "testing"
+    if input_mapping.base == "gsc":
+        from seqbench.dataset.speech_commands import SpeechCommands
 
-        method = "mfcc"
-        if "base_params" in inp_map_config and "method" in inp_map_config["base_params"]:
-            method = inp_map_config["base_params"]["method"]
-
+        split = "training" if split == "train" else "testing"
         return SpeechCommands(
-            # os.path.join(inp_map_config['base_dataset_path'], 'GSC'),
-            data_folder=os.path.join(inp_map_config["base_dataset_path"]),
+            data_folder=bp["base_dataset_path"],
             split=split,
-            # method=method,  @Younes - double check what happened to this param
-            return_raw=inp_map_config["return_raw", False],
+            return_raw=bp.get("return_raw", False),
         )
+    if input_mapping.base == "one_hot":
+        from seqbench.dataset.synthetic import OneHot
 
-    elif inp_map_config["base"] == "one_hot":
         if "alphabet_size" not in kwargs:
             raise ValueError("alphabet_size must be provided for one_hot dataset!")
-        base_dataset = OneHot(kwargs["alphabet_size"] + 1)  # +1 for the end sequence symbol
+        creates_time = has_time_creating_transform(input_mapping)
+        if creates_time:
+            if "duration" in bp:
+                raise ValueError(
+                    "one_hot.base_params.duration cannot be used with a "
+                    "time-creating transform; put the duration on the transform"
+                )
+            n_steps = 1
+        elif final_dt is not None:
+            # Stimulus footprint = round(duration / final_dt) rows. ``duration``
+            # defaults to ``final_dt`` so an unspecified stimulus is one row.
+            duration = bp.get("duration", final_dt)
+            n_steps = max(1, round(duration / final_dt))
+        else:
+            n_steps = 1
+        return OneHot(kwargs["alphabet_size"] + 1, n_steps=n_steps)
+    from seqbench.dataset.tonic_wrapper import TonicDatasetWrapper, TONIC_DATASET_REGISTRY
 
-        return base_dataset
-    
-    elif inp_map_config["base"].lower() in TONIC_DATASET_REGISTRY:
-        # Handle tonic datasets
-        dataset_name_lower = inp_map_config["base"].lower()
-        canonical_name = TONIC_DATASET_REGISTRY[dataset_name_lower]
-        root = inp_map_config["base_dataset_path"]
-        
-        # Get additional parameters from base_params if provided
-        base_params = inp_map_config.get("base_params", {})
-        
+    if input_mapping.base.lower() in TONIC_DATASET_REGISTRY:
+        canonical_name = TONIC_DATASET_REGISTRY[input_mapping.base.lower()]
         return TonicDatasetWrapper(
             dataset_name=canonical_name,
-            root=root,
+            root=bp["base_dataset_path"],
             split=split,
-            **base_params
+            **{k: v for k, v in bp.items() if k != "base_dataset_path"},
         )
-
-    else:
-        raise ValueError(f"Unknown input encoding!")
+    raise ValueError(f"Unknown input encoding: {input_mapping.base!r}")

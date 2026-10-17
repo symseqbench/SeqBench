@@ -52,7 +52,10 @@ class TonicDatasetWrapper(BaseDataset):
             **kwargs: Additional arguments to pass to the tonic dataset
         """
         if not TONIC_AVAILABLE:
-            raise ImportError("Tonic library is not available. Please install it to use tonic datasets.")
+            raise ImportError(
+                "tonic is required for tonic datasets. "
+                "Install SeqBench with the tonic extra: pip install 'seqbench[tonic]'."
+            )
         
         self.dataset_name = dataset_name
         

@@ -1,0 +1,68 @@
+################################################################################
+###                                 SymSeq                                   ###
+################################################################################
+symseq:
+  ################################################################################
+  # Generator
+  ################################################################################
+  generator:
+    type: "ArtificialGrammar"
+    mode: "random"  # "preset" | "random" | "custom"
+    seed: 42
+    constraints:
+      label: "Constrained Random Grammar"
+      alphabet_size: 4
+      ambiguities: 2
+      ambiguity_depth: 2
+      n_start_states: 1
+      transition_density: 0.25
+      assume_equiprobable: true
+      min_string_length: 1
+      eos: "#"
+
+
+################################################################################
+###                                 SeqBench                                 ###
+################################################################################
+seqbench:
+    
+    seed: 42
+    mode: "file"  # "offline", "online" or "file"
+
+    prob_generator_type: "restricted"
+
+    data_generation:
+        train_size: 100
+        test_size: 100
+        seq_len_min: 1
+        seq_len_max: 20
+        combine_sequences: True  # concatenate sequences
+        combined_seq_length: 20  # padding
+        regenerate: False
+        output_dir: 'data/SeqBench'
+
+    input_mapping:
+        base: "dvsgesture"
+        base_dataset_path: 'datasets/DVSGesture'
+        base_params:
+            download: True  # Set to True to download dataset if not present
+        transforms:
+            tonic.transforms.ToFrame:
+                sensor_size: [128, 128, 2]  # (height, width, polarity_channels) for DVSGesture
+                time_window: 10000.0        # 10ms in microseconds
+            torch.tensor:
+                dtype: torch.float32
+            CenterCrop:
+                sensor_size: [128, 128, 2]
+                output_size: (10, 10)
+            Flatten:
+                start_dim: 1
+
+
+    gap_profile:
+        start: 0
+        duration:
+            dist: "uniform"
+            params: {low: 5, high: 5}
+        dt: 0.1
+
