@@ -19,7 +19,6 @@ def _raw(**seqbench_overrides):
     """Minimal valid config; seqbench section is shallow-merged with overrides."""
     seqbench = {
         "mode": "online",
-        "prob_generator_type": "restricted",
         "splits": {"train": 8, "test": 4},
         "storage": {"path": "/tmp/sb_dt_test"},
         "time_grid": {"dt": 0.1},

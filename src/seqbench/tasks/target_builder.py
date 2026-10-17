@@ -100,7 +100,7 @@ class TaskTargetBuilder:
                 if state_id_fn is None:
                     raise ValueError(
                         "StateClassification requires a grammar source providing "
-                        "a state_id_fn (RestrictedTargetProbGenerator.unred_state_to_id)."
+                        "a state_id_fn (TargetProbGenerator.unred_state_to_id)."
                     )
                 task.state_id_fn = state_id_fn
             granularity = task.granularity
@@ -280,7 +280,7 @@ def make_task_target_builder(run_cfg, source, *, pad_index: int = -1, prob_gener
 
     Shared by :class:`~seqbench.seq_dataset.SeqDataset` and the standalone
     ``create_dataset`` script so both wire the task identically. ``prob_generator``
-    (a ``RestrictedTargetProbGenerator`` with transitions loaded) supplies the
+    (a ``TargetProbGenerator`` with transitions loaded) supplies the
     ``state_id_fn`` required by ``StateClassification``.
     """
     state_id_fn = prob_generator.unred_state_to_id if prob_generator is not None else None

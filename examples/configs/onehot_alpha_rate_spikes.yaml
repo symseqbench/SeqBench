@@ -29,7 +29,6 @@ symseq:
 
 seqbench:
   mode: file
-  prob_generator_type: restricted
   splits:
     train: 100
     test: 100

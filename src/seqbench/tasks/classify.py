@@ -128,7 +128,7 @@ class StateClassification(Task):
     Each position's target is ``state_id_fn(state_seq[i])``, covering the full
     sequence including the EOS ``'#'`` slot (which maps to 0). Requires a
     grammar source; ``state_id_fn`` (typically
-    ``RestrictedTargetProbGenerator.unred_state_to_id``) is injected by
+    ``TargetProbGenerator.unred_state_to_id``) is injected by
     :class:`~seqbench.tasks.target_builder.TaskTargetBuilder`.
     """
 

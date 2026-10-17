@@ -365,7 +365,6 @@ class SeqbenchCfg:
     input_mapping: InputMappingCfg
     task: SeqbenchTaskCfg
     seed: int | None = None
-    prob_generator_type: str = "restricted"
 
     def __post_init__(self) -> None:
         if self.mode not in ("file", "offline", "online"):
@@ -549,7 +548,6 @@ def _parse_seqbench(raw: dict) -> SeqbenchCfg:
         input_mapping=input_mapping,
         task=task,
         seed=raw.get("seed"),
-        prob_generator_type=raw.get("prob_generator_type", "restricted"),
     )
 
 

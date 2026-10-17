@@ -81,7 +81,6 @@ def sequence_cache_key_data(run_cfg, split, split_size=None):
     seqbench_seed = None
     composition = {}
     task = {}
-    prob_generator_type = None
     if run_cfg.seqbench is not None:
         seqbench_seed = (
             run_cfg.seqbench.seed
@@ -90,7 +89,6 @@ def sequence_cache_key_data(run_cfg, split, split_size=None):
         )
         composition = to_plain_data(run_cfg.seqbench.composition)
         task = to_plain_data(run_cfg.seqbench.task)
-        prob_generator_type = run_cfg.seqbench.prob_generator_type
 
     return {
         "cache_key_version": CACHE_KEY_VERSION,
@@ -111,7 +109,6 @@ def sequence_cache_key_data(run_cfg, split, split_size=None):
             "splits": to_plain_data(run_cfg.seqbench.splits if run_cfg.seqbench else {}),
             "composition": composition,
             "task": task,
-            "prob_generator_type": prob_generator_type,
         },
     }
 

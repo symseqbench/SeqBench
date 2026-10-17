@@ -26,7 +26,7 @@ import tqdm
 # Local imports
 from seqbench.seq_utils.generator import SequenceGenerator
 from seqbench.seq_utils.symbol_encoder import SymbolEncoder
-from seqbench.dataset_generator import DatasetGenerator, RestrictedTargetProbGenerator
+from seqbench.dataset_generator import DatasetGenerator, TargetProbGenerator
 from seqbench.tasks.classify import Classification, StateClassification
 from seqbench.tasks.target_builder import TaskTargetBuilder
 from seqbench.transforms.base import TimeGrid
@@ -231,12 +231,7 @@ class SeqDataset(Dataset):
 
         # We create the target_prob_generator even for classification
         # to get num_classes (unreduced-state count) from the transitions
-        if self.prob_generator_type == "restricted":
-            self.target_prob_generator = RestrictedTargetProbGenerator()
-        else:
-            raise ValueError(
-                f"Did not recognize target_prob_generator {self.prob_generator_type}!"
-            )
+        self.target_prob_generator = TargetProbGenerator()
 
         # The task module is the single source of truth for the training target.
         # state_id_fn is a bound method: the transition map is populated later
@@ -303,7 +298,6 @@ class SeqDataset(Dataset):
         self.read_from_file = (
             run_cfg.seqbench.mode == "file"
         )  # TODO self.config['read_from_file']
-        self.prob_generator_type = run_cfg.seqbench.prob_generator_type
         self.regenerate = run_cfg.seqbench.storage.force_rebuild
         self._config_file_path = config_file_path
         self._config_snapshot = (

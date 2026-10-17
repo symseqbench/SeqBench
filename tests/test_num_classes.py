@@ -91,7 +91,7 @@ def _raw(task, *, symseq_tasks=None, generator=None):
             "trial_constraints": {"length": {"min": 1, "max": 20}},
         },
         "seqbench": {
-            "mode": "online", "prob_generator_type": "restricted",
+            "mode": "online",
             "splits": {"train": 8, "test": 4},
             "storage": {"path": "/tmp/sb_numclasses_test"},
             "time_grid": {"dt": 0.1},

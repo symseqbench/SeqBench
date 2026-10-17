@@ -28,7 +28,6 @@ seqbench:
     
     seed: 43
     mode: "file"  # "offline", "online" or "file"
-    prob_generator_type: "restricted"
 
     data_generation:
         train_size: 100

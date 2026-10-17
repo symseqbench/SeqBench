@@ -50,7 +50,6 @@ def _raw(storage_path):
         },
         "seqbench": {
             "mode": "file",
-            "prob_generator_type": "restricted",
             "splits": {"train": 6, "test": 3},
             "storage": {"path": str(storage_path), "force_rebuild": True},
             "time_grid": {"dt": 0.1},

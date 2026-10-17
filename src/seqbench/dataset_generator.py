@@ -94,12 +94,12 @@ class MCState:
     probs: np.ndarray  # float
 
 
-class RestrictedTargetProbGenerator:
+class TargetProbGenerator:
     """
-    Generator for target probabilities with state restrictions.
+    Generator for target probabilities in sequence prediction tasks.
 
     This class manages the generation of target probabilities for sequence
-    prediction tasks while maintaining state transition constraints. It supports
+    prediction tasks while maintaining state transition. It supports
     both reduced and unreduced state spaces for efficient probability computation.
 
     Attributes:

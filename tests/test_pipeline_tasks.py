@@ -53,7 +53,6 @@ def _raw(task, *, symseq_tasks=None, generator=None, combine=False, mode="online
         },
         "seqbench": {
             "mode": mode,
-            "prob_generator_type": "restricted",
             "splits": {"train": 8, "test": 4},
             "storage": {"path": storage_path},
             "time_grid": {"dt": 0.1},
@@ -252,7 +251,6 @@ def test_label_source_base_reads_from_base_dataset():
         },
         "seqbench": {
             "mode": "online",
-            "prob_generator_type": "restricted",
             "splits": {"train": 8, "test": 4},
             "storage": {"path": "/tmp/sb_label_base_test"},
             "time_grid": {"dt": 0.1},
