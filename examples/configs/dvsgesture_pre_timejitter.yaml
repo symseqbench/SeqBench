@@ -1,0 +1,92 @@
+run:
+  seed: 42
+
+symbol_space:
+  alphabet:
+    size: 4
+  eos: "#"
+
+symseq:
+  generator:
+    type: ArtificialGrammar
+    mode: random
+    params:
+      label: Constrained Random Grammar
+      ambiguities: 2
+      ambiguity_depth: 2
+      n_start_states: 1
+      transition_density: 0.25
+      assume_equiprobable: true
+  trial_constraints:
+    length:
+      min: 1
+      max: 20
+  tasks:
+    - id: next_token
+      type: NStepPrediction
+      params:
+        n: 1
+
+seqbench:
+  mode: file
+  prob_generator_type: restricted
+  splits:
+    train: 100
+    test: 100
+  time_grid:
+    dt: 0.01
+    validation: error
+  storage:
+    path: data/SeqBench
+    force_rebuild: false
+  composition:
+    combine_sequences: true
+    sample_length: 20
+    gap_profile:
+      start: 0
+      duration:
+        dist: uniform
+        params:
+          low: 5
+          high: 5
+  input_mapping:
+    base: dvsgesture
+    base_params:
+      download: true
+      base_dataset_path: datasets/DVSGesture
+    transforms:
+      - type: tonic.transforms.TimeJitter
+        params:
+          std: 1000.0
+          clip_negative: true
+          sort_timestamps: true
+        time_behavior: preserve
+      - type: tonic.transforms.ToFrame
+        params:
+          sensor_size:
+            - 128
+            - 128
+            - 2
+          time_window: 10000.0
+        time_behavior:
+          kind: create
+          out_dt: 0.01
+      - type: torch.tensor
+        params:
+          dtype: torch.float32
+        time_behavior: preserve
+      - type: CenterCrop
+        params:
+          sensor_size:
+            - 128
+            - 128
+            - 2
+          output_size:
+            - 10
+            - 10
+      - type: Flatten
+        params:
+          start_dim: 1
+  task:
+    source: symseq
+    ref_id: next_token

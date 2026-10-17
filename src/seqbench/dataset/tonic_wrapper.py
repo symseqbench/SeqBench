@@ -11,6 +11,7 @@ making them compatible with SeqBench's BaseDataset interface.
 from typing import Dict
 import importlib
 import inspect
+import os
 
 from seqbench.dataset.base import BaseDataset
 
@@ -21,6 +22,20 @@ try:
 except ImportError:
     TONIC_AVAILABLE = False
     print("Warning: Tonic library not available. Tonic datasets cannot be used.")
+
+
+def _tonic_save_to(root: str, dataset_name: str) -> str:
+    """Translate a SeqBench dataset directory to Tonic's parent directory.
+
+    Tonic appends the dataset class name to ``save_to``. SeqBench configs use
+    ``base_dataset_path`` for the dataset directory itself, so passing a path
+    such as ``/data/DVSGesture`` unchanged would make Tonic look in
+    ``/data/DVSGesture/DVSGesture``.
+    """
+    normalized_root = os.path.normpath(os.path.expanduser(root))
+    if os.path.basename(normalized_root).casefold() == dataset_name.casefold():
+        return os.path.dirname(normalized_root)
+    return normalized_root
 
 
 class TonicDatasetWrapper(BaseDataset):
@@ -81,7 +96,7 @@ class TonicDatasetWrapper(BaseDataset):
         
         # Standard parameters that most tonic datasets accept
         if 'save_to' in valid_params:
-            init_kwargs['save_to'] = root
+            init_kwargs['save_to'] = _tonic_save_to(root, dataset_name)
         elif 'root' in valid_params:
             init_kwargs['root'] = root
         

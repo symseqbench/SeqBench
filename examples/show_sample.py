@@ -25,6 +25,23 @@ class DataTuple(_DataTuple):
     __slots__ = ()
 
 
+def _input_image_for_plot(tensor, max_time_bins=2000):
+    """Return a display-only max-pooled image without changing model input."""
+    tensor = tensor.detach().cpu().squeeze()
+    if tensor.ndim != 2:
+        raise ValueError(f"Expected input shaped [time, channels], got {tuple(tensor.shape)}")
+
+    n_steps, n_channels = tensor.shape
+    if n_steps > max_time_bins:
+        tensor = torch.nn.functional.adaptive_max_pool1d(
+            tensor.T.unsqueeze(0), max_time_bins
+        ).squeeze(0).T
+
+    image = tensor.T.numpy()
+    extent = (0, n_steps, -0.5, n_channels - 0.5)
+    return image, extent
+
+
 _AlgSeqAuxTuple = collections.namedtuple(
     "AlgSeqAuxTuple", ("seq_length", "trans_probs", "sequences", "debug_class_seq")
 )
@@ -126,18 +143,18 @@ def show_sample(
     params = {"cmap": "Greys"}
 
     if per_token_classify:
-        ax1.set_title(f"Inputs={[target_prob_generator.id_to_red_state(s) for s in sequence]}")
+        ax1.set_title(f"Inputs={[target_prob_generator.id_to_red_state(s) for s in sequence]}", fontsize=8)
     else:
         Inputs_state = [target_prob_generator.id_to_unred_state(s) for s in sequence]
         Inputs = [sym[0] if len(sym) > 1 else sym for sym in Inputs_state]
-        ax1.set_title(f"Inputs={Inputs}")
+        ax1.set_title(f"Inputs={Inputs}", fontsize=8)
 
     tensor = data_tuple.inputs[sample_number, :, :]
-    if len(tensor) >= 3:
-        tensor = tensor.squeeze()
+    input_image, input_extent = _input_image_for_plot(tensor)
 
     ax1.imshow(
-        np.transpose(tensor, [1, 0]),
+        input_image,
+        extent=input_extent,
         aspect="auto",
         origin="lower",
         interpolation="none",
@@ -199,7 +216,13 @@ def show_sample(
         Inputs = [sym[0] if len(sym) > 1 else sym for sym in Inputs_state]
         plt.title(f"Inputs={Inputs}")
 
-    plt.imshow(np.transpose(tensor, [1, 0]), aspect="auto", origin="lower", **params)
+    plt.imshow(
+        input_image,
+        extent=input_extent,
+        aspect="auto",
+        origin="lower",
+        **params,
+    )
 
     # Plot!
     fig.tight_layout()
