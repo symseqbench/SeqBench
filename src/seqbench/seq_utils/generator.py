@@ -85,15 +85,9 @@ class SequenceGenerator:
 
         # Topological entropy — only available for grammar sources.
         if self.compute_te:
-            if hasattr(self.source, "transition_table") and hasattr(
-                self.source, "topological_entropy"
-            ):
-                transition_table = (
-                    self.source.transition_table(correct=True, display=False) > 0
-                ).astype(int)
-                TE = self.source.topological_entropy(
-                    transitions=transition_table, method="direct"
-                )
+            if hasattr(self.source, "topological_entropy"):
+                # closed graph (EOS -> start states), as TE is defined in the AGL literature
+                TE = self.source.topological_entropy(correct_terminal_sink=True)
                 try:
                     import wandb
 
@@ -105,7 +99,7 @@ class SequenceGenerator:
                 print("####")
             else:
                 logger.info(
-                    "compute_te requested but source has no transition_table; skipping."
+                    "compute_te requested but source has no topological_entropy; skipping."
                 )
 
         # @BZ: can we remove this here and use symseq's plotting?
