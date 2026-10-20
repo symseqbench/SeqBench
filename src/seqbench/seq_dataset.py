@@ -25,6 +25,7 @@ import tqdm
 
 # Local imports
 from seqbench.seq_utils.generator import SequenceGenerator
+from seqbench.seq_utils.seeding import Stream, trial_rng, trial_seed_sequence
 from seqbench.seq_utils.symbol_encoder import SymbolEncoder
 from seqbench.dataset_generator import DatasetGenerator, TargetProbGenerator
 from seqbench.tasks.classify import Classification, StateClassification
@@ -209,6 +210,11 @@ class SeqDataset(Dataset):
             self.load_to_tensor = lambda x: x
 
         if self._seed is None:
+            if self._render_seeding == "per_trial":
+                raise ValueError(
+                    "seqbench.render_seeding='per_trial' requires a seed "
+                    "(seqbench.seed or run.seed)"
+                )
             self.rng = np.random.default_rng()
             logger.warning("Results will not be reproducible!")
         else:
@@ -311,6 +317,7 @@ class SeqDataset(Dataset):
             source_config_path=config_file_path,
         )
         self._input_mapping_base = run_cfg.seqbench.input_mapping.base
+        self._render_seeding = run_cfg.seqbench.render_seeding
         self._global_noise = 0
 
         # Sequence generator params
@@ -568,7 +575,45 @@ class SeqDataset(Dataset):
         else:
             return shape[1:]
 
-    def _add_gap_content(self, seq_element, state_idx, reshape):
+    def _render_rng(self, item_idx, stream, seq_element):
+        """Return the NumPy RNG for one random factor of one sequence element.
+
+        Parameters
+        ----------
+        item_idx : int or None
+            Dataset item index.
+        stream : Stream
+            Random factor (``Stream.BASE_ITEM`` or ``Stream.GAP``).
+        seq_element : int
+            Element position within the item.
+
+        Returns
+        -------
+        numpy.random.Generator
+            With ``render_seeding="per_trial"``, a generator keyed by
+            ``(seed, split, item_idx, stream, seq_element)``; otherwise the
+            shared dataset-level ``self.rng`` (consumed in access order).
+        """
+        if self._render_seeding == "per_trial":
+            if item_idx is None:
+                raise ValueError("per_trial render seeding requires the item index")
+            return trial_rng(self._seed, self.split, item_idx, stream, seq_element)
+        return self.rng
+
+    def _reseed_transform(self, item_idx, *sub):
+        """Reseed stochastic transforms before one application (per_trial only).
+
+        ``sub`` identifies the application within the item: ``(element, 0)``
+        for a symbol's stimulus, ``(element, 1, j)`` for the j-th gap filler.
+        Transforms without a ``reseed`` hook are unaffected.
+        """
+        if self._render_seeding != "per_trial":
+            return
+        hook = getattr(self.transform, "reseed", None)
+        if hook is not None:
+            hook(trial_seed_sequence(self._seed, self.split, item_idx, Stream.TRANSFORM, *sub))
+
+    def _add_gap_content(self, seq_element, state_idx, reshape, item_idx=None):
         """
         Add gap content between sequence elements based on gap_profile configuration.
 
@@ -576,20 +621,28 @@ class SeqDataset(Dataset):
             seq_element: Current position in the sequence.
             state_idx: Current state index.
             reshape: Function to reshape data samples.
+            item_idx: Dataset item index; keys the gap's random stream when
+                ``render_seeding`` is ``"per_trial"``.
 
         Returns:
             List of tensors representing the gap items.
         """
         gap_items = []
         gp = self._gap_profile
+        rng = self._render_rng(item_idx, Stream.GAP, seq_element)
 
         if seq_element < gp.start:
             delay = 0
         else:
-            if self.rng.random() > gp.gap_prob:
+            if rng.random() > gp.gap_prob:
                 delay = 0
             elif isinstance(gp.duration, dict) and "dist" in gp.duration:
-                delay = float(gp.duration["dist"](**gp.duration["params"]))
+                dist = gp.duration["dist"]
+                if self._render_seeding == "per_trial":
+                    # Same distribution, drawn from the item's gap stream
+                    # instead of the global np.random state.
+                    dist = getattr(rng, dist.__name__)
+                delay = float(dist(**gp.duration["params"]))
             else:
                 delay = float(gp.duration)
 
@@ -606,18 +659,21 @@ class SeqDataset(Dataset):
                 # their actual emitted lengths and truncating the last one so the
                 # filler occupies the same footprint as a zero gap of equal delay.
                 accumulated = 0
+                n_fillers = 0
                 while accumulated < gap_steps:
-                    idx = self.rng.choice(preds_idx)
+                    idx = rng.choice(preds_idx)
                     if self._input_mapping_base == "one_hot":
                         delay_idx = self.base_dataset.class_dict[idx]
                     else:
                         delay_idx = int(
-                            self.rng.choice(self.base_dataset.class_dict[idx])
+                            rng.choice(self.base_dataset.class_dict[idx])
                         )
 
                     delay_content = reshape(self.base_dataset[delay_idx][0])
                     if self.transform:
+                        self._reseed_transform(item_idx, seq_element, 1, n_fillers)
                         delay_content = self.transform(delay_content)
+                    n_fillers += 1
                     remaining = gap_steps - accumulated
                     if delay_content.shape[0] > remaining:
                         delay_content = delay_content[:remaining]
@@ -640,7 +696,13 @@ class SeqDataset(Dataset):
         if gp.noise is not None and not gp.add_nongramm_gap:
             for i, gap_item in enumerate(gap_items):
                 gap_item = gap_item.float()
-                rand_noise = torch.rand_like(gap_item) * self._global_noise
+                if self._render_seeding == "per_trial":
+                    uniform = torch.as_tensor(
+                        rng.random(tuple(gap_item.shape)), dtype=gap_item.dtype
+                    )
+                else:
+                    uniform = torch.rand_like(gap_item)
+                rand_noise = uniform * self._global_noise
                 gap_items[i] = gap_item + rand_noise
 
         return gap_items
@@ -711,7 +773,7 @@ class SeqDataset(Dataset):
             reshape = lambda x: self.load_to_tensor(x)
 
         if self.is_per_trial:
-            return self.__build_per_trial_item(sample, reshape)
+            return self.__build_per_trial_item(sample, reshape, idx)
 
         if self.per_token_classify:
             target_probs_or_placeholder = sample.class_seq
@@ -738,7 +800,9 @@ class SeqDataset(Dataset):
                 data_idx = self.base_dataset.class_dict[data_idx]
             else:
                 data_idx = int(
-                    self.rng.choice(self.base_dataset.class_dict[data_idx])
+                    self._render_rng(idx, Stream.BASE_ITEM, seq_element).choice(
+                        self.base_dataset.class_dict[data_idx]
+                    )
                 )  # 1 2 3 0 -> 283 12002 1233 1737
 
             cur_data_sample = self.base_dataset[data_idx][0]
@@ -751,13 +815,16 @@ class SeqDataset(Dataset):
                 # print("Sample shape before transform:", cur_data_sample.shape)
                 # print("Sample shape after transform:", cur_data_sample_tmp.shape)
                 # cur_data_sample = cur_data_sample_tmp
+                self._reseed_transform(idx, seq_element, 0)
                 cur_data_sample = self.transform(cur_data_sample)
                 self.base_shape = self.__get_dynamic_samples_dimensions(cur_data_sample)
 
             data.append(cur_data_sample)
 
             if self._gap_profile is not None:
-                gap_items = self._add_gap_content(seq_element, state_idx, reshape)
+                gap_items = self._add_gap_content(
+                    seq_element, state_idx, reshape, item_idx=idx
+                )
                 data.extend(gap_items)
                 delay_dur = (
                     sum(item.shape[0] for item in gap_items)
@@ -844,7 +911,7 @@ class SeqDataset(Dataset):
             ]
         )
 
-    def __build_per_trial_item(self, sample, reshape):
+    def __build_per_trial_item(self, sample, reshape, idx):
         """Assemble a whole-sequence classification item: one label per sample.
 
         The input is built by the same per-token embedding + gap assembly as the
@@ -861,16 +928,20 @@ class SeqDataset(Dataset):
             if self._input_mapping_base == "one_hot":
                 data_idx = self.base_dataset.class_dict[data_idx]
             else:
-                data_idx = int(self.rng.choice(self.base_dataset.class_dict[data_idx]))
+                rng = self._render_rng(idx, Stream.BASE_ITEM, seq_element)
+                data_idx = int(rng.choice(self.base_dataset.class_dict[data_idx]))
 
             cur_data_sample = reshape(self.base_dataset[data_idx][0])
             if self.transform:
+                self._reseed_transform(idx, seq_element, 0)
                 cur_data_sample = self.transform(cur_data_sample)
                 self.base_shape = self.__get_dynamic_samples_dimensions(cur_data_sample)
             data.append(cur_data_sample)
 
             if self._gap_profile is not None:
-                gap_items = self._add_gap_content(seq_element, state_idx, reshape)
+                gap_items = self._add_gap_content(
+                    seq_element, state_idx, reshape, item_idx=idx
+                )
                 data.extend(gap_items)
                 delay_dur = sum(item.shape[0] for item in gap_items) if gap_items else 0
             else:
