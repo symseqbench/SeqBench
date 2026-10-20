@@ -517,6 +517,7 @@ class SeqDataset(Dataset):
             combine_sequences=self._combine_sequences,
             combined_seq_len=self._combined_seq_len,
             seed=self._seed,
+            split=self.split,
             trial_params=self._trial_params,
             task_builder=self.target_builder,
         )

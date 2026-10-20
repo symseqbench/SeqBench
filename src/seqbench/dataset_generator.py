@@ -441,10 +441,10 @@ class DatasetGenerator:
         Generate a single sample (used for parallel processing).
 
         Args:
-            args: Tuple containing (idx, generator, output_file, lock)
+            args: Tuple containing (idx, generator, output_file, lock, split)
         """
-        idx, generator, output_file, lock = args
-        gensample = generator.generate(idx)
+        idx, generator, output_file, lock, split = args
+        gensample = generator.generate(idx, split=split)
         # Use lock to safely write to shared file
         with lock:
             with open(output_file, "a") as f:
@@ -461,7 +461,7 @@ class DatasetGenerator:
         print(f"Generating {filename}!")
         file = open(os.path.join(self.output_dir, filename), "w")
         for i in tqdm.tqdm(range(dataset_size)):
-            gensample = self.seq_generator.generate(i)
+            gensample = self.seq_generator.generate(i, split=filename)
             DatasetGenerator.write_gensample_to_file(file, gensample)
         file.close()
 
@@ -486,7 +486,9 @@ class DatasetGenerator:
                 pass
 
             # Create argument tuples for each task
-            args_list = [(i, self.seq_generator, output_file, lock) for i in range(dataset_size)]
+            args_list = [
+                (i, self.seq_generator, output_file, lock, filename) for i in range(dataset_size)
+            ]
 
             # Use multiprocessing to generate and write samples in parallel
             with Pool() as pool:
