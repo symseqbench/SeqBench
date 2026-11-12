@@ -41,6 +41,7 @@ def _nback_gen(combine, combined_seq_len=20):
         combine_sequences=combine,
         combined_seq_len=combined_seq_len,
         seed=7,
+        split="train",
     )
 
 
@@ -108,6 +109,7 @@ def test_per_trial_target_spread_under_combine():
         combine_sequences=True,
         combined_seq_len=10,
         seed=1,
+        split="train",
     )
     gs = gen.generate(idx=1, compute_length=True)
     assert gs.class_seq.shape[0] == 10
@@ -126,6 +128,7 @@ def test_per_trial_target_forwarded_without_combine():
         combine_sequences=False,
         combined_seq_len=10,
         seed=1,
+        split="train",
     )
     gs = gen.generate(idx=1, compute_length=True)
     assert gs.targets is not None

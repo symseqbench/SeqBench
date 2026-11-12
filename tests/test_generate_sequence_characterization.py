@@ -46,6 +46,7 @@ def test_generate_sequence_appends_eos():
         combine_sequences=False,
         combined_seq_len=run_cfg.seqbench.composition.sample_length,
         seed=run_cfg.run.seed,
+        split="train",
     )
     gs = gen.generate(idx=1, compute_length=True)
 
@@ -64,6 +65,7 @@ def test_generate_sequences_truncation():
         combine_sequences=True,
         combined_seq_len=combined,
         seed=run_cfg.run.seed,
+        split="train",
     )
     gs = gen.generate(idx=1, compute_length=True)
 

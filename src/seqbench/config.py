@@ -365,11 +365,24 @@ class SeqbenchCfg:
     input_mapping: InputMappingCfg
     task: SeqbenchTaskCfg
     seed: int | None = None
+    # How rendering randomness (base-item choice, gaps, stochastic transforms)
+    # is seeded. "sequential": one dataset-level RNG consumed in access order.
+    # "per_trial": independent streams derived from (seed, split, idx), so each
+    # item renders identically regardless of access order or workers. Only
+    # transforms with a ``reseed`` hook (currently PoissonEncoding) follow
+    # "per_trial"; other stochastic transforms and base-dataset internals keep
+    # their own RNG behaviour.
+    render_seeding: str = "sequential"
 
     def __post_init__(self) -> None:
         if self.mode not in ("file", "offline", "online"):
             raise ValueError(
                 f"seqbench.mode must be 'file' | 'offline' | 'online', got {self.mode!r}"
+            )
+        if self.render_seeding not in ("sequential", "per_trial"):
+            raise ValueError(
+                "seqbench.render_seeding must be 'sequential' | 'per_trial', "
+                f"got {self.render_seeding!r}"
             )
         _validate_splits(self.splits, where="seqbench.splits")
 
@@ -548,6 +561,7 @@ def _parse_seqbench(raw: dict) -> SeqbenchCfg:
         input_mapping=input_mapping,
         task=task,
         seed=raw.get("seed"),
+        render_seeding=raw.get("render_seeding", "sequential"),
     )
 
 

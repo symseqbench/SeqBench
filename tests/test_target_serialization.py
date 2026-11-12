@@ -120,6 +120,7 @@ def test_roundtrip_configured_nback_targets():
         combine_sequences=False,
         combined_seq_len=20,
         seed=3,
+        split="train",
     )
     gs = gen.generate(idx=1, compute_length=True)
     assert gs.targets is not None
