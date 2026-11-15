@@ -6,11 +6,28 @@ Base transform protocol and time-grid metadata for transform pipelines.
 """
 
 from dataclasses import dataclass
-from typing import Protocol, Any, Literal
+from typing import TYPE_CHECKING, Protocol, Any, Literal
+
+if TYPE_CHECKING:
+    import numpy
 
 
 class Transform(Protocol):
     def __call__(self, x: Any) -> Any: ...
+
+
+class Reseedable(Protocol):
+    """Optional hook for transforms that draw random numbers.
+
+    With ``seqbench.render_seeding: per_trial``, ``SeqDataset`` calls
+    ``reseed`` before every transform application with a seed sequence derived
+    from ``(seed, split, idx, element)``. Subsequent draws must come only from
+    that seed sequence, so the output depends on the item, not on access
+    order. Transforms without this method are treated as deterministic (or
+    keep their own RNG behaviour).
+    """
+
+    def reseed(self, seed_seq: "numpy.random.SeedSequence") -> None: ...
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from seqbench.seq_utils.seeding import Stream, trial_rng
 from seqbench.seq_utils.symbol_encoder import SymbolEncoder
 from seqbench.tasks.base import Target
 
@@ -63,6 +64,7 @@ class SequenceGenerator:
         combine_sequences: bool,
         combined_seq_len: int,
         seed=None,
+        split: str | None = None,
         compute_te=False,
         plot_transition_table=False,
         trial_params: dict | None = None,
@@ -70,6 +72,7 @@ class SequenceGenerator:
     ):
         self.task_builder = task_builder
         self.seed = seed
+        self.split = split
         self.compute_te = compute_te
         self.plot_transition_table = plot_transition_table
         self.num_illustration_seq = 4
@@ -85,15 +88,9 @@ class SequenceGenerator:
 
         # Topological entropy — only available for grammar sources.
         if self.compute_te:
-            if hasattr(self.source, "transition_table") and hasattr(
-                self.source, "topological_entropy"
-            ):
-                transition_table = (
-                    self.source.transition_table(correct=True, display=False) > 0
-                ).astype(int)
-                TE = self.source.topological_entropy(
-                    transitions=transition_table, method="direct"
-                )
+            if hasattr(self.source, "topological_entropy"):
+                # closed graph (EOS -> start states), as TE is defined in the AGL literature
+                TE = self.source.topological_entropy(correct_terminal_sink=True)
                 try:
                     import wandb
 
@@ -105,7 +102,7 @@ class SequenceGenerator:
                 print("####")
             else:
                 logger.info(
-                    "compute_te requested but source has no transition_table; skipping."
+                    "compute_te requested but source has no topological_entropy; skipping."
                 )
 
         # @BZ: can we remove this here and use symseq's plotting?
@@ -156,12 +153,42 @@ class SequenceGenerator:
                     "plot_transition_table requested but source has no transition_table; skipping."
                 )
 
-    def generate(self, idx, compute_length=True):
+    def generate(self, idx, compute_length=True, split: str | None = None):
+        """Draw the symbolic sample for item ``idx`` of a split.
 
+        Parameters
+        ----------
+        idx : int
+            Item index within the split.
+        compute_length : bool, optional
+            Whether to fill ``GeneratorSample.length``.
+        split : str or None, optional
+            Split name overriding ``self.split``. The symbols depend only on
+            ``(seed, split, idx)``, so different splits draw independent trials.
+
+        Returns
+        -------
+        GeneratorSample
+            Encoded EOS-terminated sample with forwarded targets.
+
+        Raises
+        ------
+        ValueError
+            If the generator is seeded but no split is known (neither the
+            argument nor ``self.split``), which would make all splits draw the
+            same trials.
+        """
         # Per-sample seeding. symseq generators expose a writable .rng;
         # other sources may choose to ignore this.
         if self.seed is not None:
-            self.source.rng = np.random.default_rng(self.seed * idx)
+            split = self.split if split is None else split
+            if split is None:
+                raise ValueError(
+                    "A seeded SequenceGenerator needs a split (constructor or "
+                    "generate(split=...)); without it train and test would draw "
+                    "identical trials."
+                )
+            self.source.rng = trial_rng(self.seed, split, idx, Stream.SYMBOL)
         else:
             self.source.rng = np.random.default_rng()
 

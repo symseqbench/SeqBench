@@ -45,6 +45,23 @@ class Compose:
             self._validate_tensor_time_contract(step, before, x)
         return x
 
+    def reseed(self, seed_seq):
+        """Reseed every stochastic step from one seed sequence.
+
+        Each step receives its own child sequence (keyed by step position), so
+        adding or reseeding one step does not shift another step's draws.
+        Steps without a ``reseed`` method are left untouched.
+
+        Parameters
+        ----------
+        seed_seq : numpy.random.SeedSequence
+            Entropy source for this application of the pipeline.
+        """
+        for transform, child in zip(self.transforms, seed_seq.spawn(len(self.transforms))):
+            hook = getattr(transform, "reseed", None)
+            if hook is not None:
+                hook(child)
+
     def resolve_time_grid(self, initial_grid, expected_final_grid, validation="error"):
         """Resolve the transform chain's final time grid.
 

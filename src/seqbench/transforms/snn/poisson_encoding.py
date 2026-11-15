@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import logging
 
+from seqbench.seq_utils.seeding import torch_generator
 from seqbench.transforms.base import TransformTimeSpec
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,9 @@ class PoissonEncoding:
         self.normalize = normalize
         self.frozen_noise = frozen_noise
         self.trng = torch.Generator()
+        # Set by reseed() (render_seeding: per_trial); None keeps the
+        # original RNG behaviour.
+        self._draw_generator = None
         self.input_dt = None
 
         if seed is not None:
@@ -120,6 +124,24 @@ class PoissonEncoding:
             return input_steps * int(round(self.input_dt / self.spike_dt))
         return int(round(self.duration / self.spike_dt))
 
+    def reseed(self, seed_seq: np.random.SeedSequence) -> None:
+        """Draw subsequent spikes from a generator seeded by ``seed_seq``.
+
+        Applies to the temporal path and to the static path without
+        ``frozen_noise``; a frozen pattern stays fixed by design.
+
+        Parameters
+        ----------
+        seed_seq : numpy.random.SeedSequence
+            Entropy source for the next spike draws.
+        """
+        self._draw_generator = torch_generator(seed_seq)
+
+    def _uniform(self, like: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
+        """Uniform [0, 1) draws shaped like ``like`` from a CPU generator."""
+        draws = torch.rand(like.shape, dtype=like.dtype, generator=generator)
+        return draws.to(like.device)
+
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """
         x : torch.Tensor
@@ -164,7 +186,11 @@ class PoissonEncoding:
             )
 
         # Generate spikes
-        spikes = (torch.rand_like(p_spike) < p_spike).float()
+        if self._draw_generator is not None:
+            rand_vals = self._uniform(p_spike, self._draw_generator)
+        else:
+            rand_vals = torch.rand_like(p_spike)
+        spikes = (rand_vals < p_spike).float()
         return spikes
 
     # ---------------- Static ----------------
@@ -185,7 +211,10 @@ class PoissonEncoding:
         rates_hz = self._normalize(x_expanded) if self.normalize else x_expanded
         p_spike = 1.0 - torch.exp(-rates_hz * self.spike_dt)
 
-        rand_vals = torch.rand(p_spike.shape, device=p_spike.device, dtype=p_spike.dtype, generator=self.trng)
+        if self._draw_generator is not None and not self.frozen_noise:
+            rand_vals = self._uniform(p_spike, self._draw_generator)
+        else:
+            rand_vals = torch.rand(p_spike.shape, device=p_spike.device, dtype=p_spike.dtype, generator=self.trng)
         spikes = (rand_vals < p_spike).float()
         return spikes
 
